@@ -1,0 +1,42 @@
+# GPSDyno - GPS-based vehicle power calculator
+# Copyright (C) 2024 GPSDyno Contributors
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+"""Core calculation module: physics, filters, warnings, power estimation."""
+from .filters import (
+    kalman_cv,
+    kalman_altitude,
+    apply_savgol_filter,
+    validate_param,
+    pre_kalman_filter,
+)
+from .power_core import calculate_average_speed_for_percentile
+from .warnings import compute_warnings
+from .density import (
+    calculate_power_estimation,
+    plot_power_methods,
+)
+
+__all__ = [
+    'kalman_cv',
+    'kalman_altitude',
+    'apply_savgol_filter',
+    'validate_param',
+    'pre_kalman_filter',
+    'calculate_average_speed_for_percentile',
+    'compute_warnings',
+    'calculate_power_estimation',
+    'plot_power_methods',
+]
