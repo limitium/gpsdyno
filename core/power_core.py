@@ -31,6 +31,11 @@ if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
 from config import WINDOW_HALF_WIDTH
+from .structures import (
+    POWER_SPEED_SPEED_KMH,
+    POWER_SPEED_POWER_HP,
+    POWER_SPEED_IS_VALID,
+)
 
 
 def calculate_average_speed_for_percentile(power_speed_data, percentile):
@@ -47,11 +52,16 @@ def calculate_average_speed_for_percentile(power_speed_data, percentile):
     if not power_speed_data:
         return None
 
-    filtered = [p for p in power_speed_data if len(p) < 3 or p[2]]
+    filtered = [
+        point
+        for point in power_speed_data
+        if len(point) <= POWER_SPEED_IS_VALID or point[POWER_SPEED_IS_VALID]
+    ]
     if not filtered:
         return None
 
-    sorted_data = sorted(filtered, key=lambda x: x[1])
+    # Sort by power value
+    sorted_data = sorted(filtered, key=lambda x: x[POWER_SPEED_POWER_HP])
     n = len(sorted_data)
     if n == 0:
         return None
@@ -68,13 +78,15 @@ def calculate_average_speed_for_percentile(power_speed_data, percentile):
     if start_index >= end_index:
         target_index = int(round(percentile / 100 * n)) - 1
         target_index = max(0, min(n - 1, target_index))
-        return float(sorted_data[target_index][0])
+        return float(sorted_data[target_index][POWER_SPEED_SPEED_KMH])
 
-    speeds_in_window = [point[0] for point in sorted_data[start_index:end_index]]
+    speeds_in_window = [
+        point[POWER_SPEED_SPEED_KMH] for point in sorted_data[start_index:end_index]
+    ]
 
     if not speeds_in_window:
         target_index = int(round(percentile / 100 * n)) - 1
         target_index = max(0, min(n - 1, target_index))
-        return float(sorted_data[target_index][0])
+        return float(sorted_data[target_index][POWER_SPEED_SPEED_KMH])
 
     return float(np.mean(speeds_in_window))

@@ -34,6 +34,7 @@ if SCRIPT_DIR not in sys.path:
 from core.calculator import calculate_power
 from core.visualization import plot_power_chart, plot_track_pseudo3d, correlate_track_data
 from core.warnings import compute_warnings as compute_warnings_unified
+from core.structures import SPEED_ABS_MS
 from parsers.nmea_handler import (
     extract_speed_altitude_data,
     parse_nmea_file,
@@ -130,7 +131,7 @@ def analyze_nmea_file(nmea_file_path, weather_json_path=None):
             result['coords'] = coords_data
 
         if speed_data and first_timestamp_ms is not None:
-            last_timestamp_ms = speed_data[-1][0]
+            last_timestamp_ms = speed_data[-1][SPEED_ABS_MS]
             result['session_duration_ms'] = last_timestamp_ms - first_timestamp_ms
 
     except ValueError as ve:

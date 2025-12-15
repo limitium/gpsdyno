@@ -45,6 +45,13 @@ except ImportError:
     from ..locales.strings import LABELS
 
 from .density import plot_power_methods
+from .structures import (
+    SPEED_ABS_MS,
+    SPEED_REL_MS,
+    SPEED_SPEED_KMH,
+    ALT_ABS_MS,
+    ALT_ALTITUDE_M,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -509,8 +516,12 @@ def correlate_track_data(coords_data, speed_data, altitude_data, power_data):
         dict: {'coords': [...], 'speeds': [...], 'altitudes': [...], 'powers': [...]}
     """
     # Build timestamp -> value maps
-    speed_by_ts = {s[0]: (s[3], s[1]) for s in speed_data}  # ts -> (speed_kph, relative_ms)
-    alt_by_ts = {a[0]: a[3] for a in altitude_data}  # ts -> altitude_m
+    # ts_ms -> (speed_kmh, relative_ms)
+    speed_by_ts = {
+        s[SPEED_ABS_MS]: (s[SPEED_SPEED_KMH], s[SPEED_REL_MS]) for s in speed_data
+    }
+    # ts_ms -> altitude_m
+    alt_by_ts = {a[ALT_ABS_MS]: a[ALT_ALTITUDE_M] for a in altitude_data}
 
     # Build relative_s -> power map
     power_by_rel = {p[0]: p[1] for p in power_data.get('power_time', [])}

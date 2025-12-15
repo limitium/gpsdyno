@@ -38,6 +38,16 @@ from .filters import (
 )
 from .density import calculate_power_estimation
 from .uncertainty import calculate_total_uncertainty
+from .structures import (
+    SPEED_ABS_MS,
+    SPEED_REL_MS,
+    SPEED_TIME_STR,
+    SPEED_SPEED_KMH,
+    SPEED_NUM_SATS,
+    SPEED_HDOP,
+    ALT_ABS_MS,
+    ALT_ALTITUDE_M,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,28 +92,38 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
         logger.warning("Insufficient speed data for power calculation")
         return None
 
-    abs_times_ms = []
-    rel_times_ms = []
-    times_str = []
-    speeds_kmh = []
-    valid_flags = []
+    n_points = len(speed_data)
+
+    # Pre-allocate arrays/lists for speed_data fields
+    abs_times_ms = np.empty(n_points, dtype=np.int64)
+    rel_times_ms = np.empty(n_points, dtype=np.int64)
+    speeds_kmh = np.empty(n_points, dtype=float)
+    times_str = [None] * n_points
+    num_sats_arr = np.empty(n_points, dtype=np.int32)
+    
+    # Collect HDOP values for percentile calculation while unpacking tuples
+    # Use fallback value for missing HDOP (matching old behavior)
+    hdop_fallback = getattr(config, 'HDOP_FALLBACK_VALUE', 0.7)
+    hdop_per_point = np.full(n_points, hdop_fallback, dtype=float)
     hdop_values = []
+    for i, point in enumerate(speed_data):
+        abs_times_ms[i] = point[SPEED_ABS_MS]
+        rel_times_ms[i] = point[SPEED_REL_MS]
+        times_str[i] = point[SPEED_TIME_STR]
+        speeds_kmh[i] = point[SPEED_SPEED_KMH]
 
-    power_time_series = []
-    power_speed_data = []
-    air_resistance_series = []
-    rolling_force_series = []
-    acceleration_force_series = []
-    slope_force_series = []
+        num_sats = point[SPEED_NUM_SATS] if len(point) > SPEED_NUM_SATS else None
+        hdop_val = point[SPEED_HDOP] if len(point) > SPEED_HDOP else None
+        num_sats_arr[i] = -1 if num_sats is None else int(num_sats)
 
-    # Collect HDOP values for percentile calculation
-    for point in speed_data:
-        hdop_val = point[6] if len(point) > 6 else None
+        # Use fallback for missing HDOP (matching old behavior for Kalman filter)
         if hdop_val is not None and hdop_val > 0:
-            hdop_values.append(hdop_val)
+            hdop_per_point[i] = float(hdop_val)
+            hdop_values.append(float(hdop_val))
+        else:
+            hdop_per_point[i] = hdop_fallback
 
     # Calculate adaptive HDOP threshold
-    hdop_fallback = getattr(config, 'HDOP_FALLBACK_VALUE', 0.7)
     hdop_threshold = hdop_fallback  # Default fallback
     hdop_statistics = None
     if hdop_values:
@@ -122,22 +142,23 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
             'count': len(hdop_values)
         }
 
-    for point in speed_data:
-        abs_times_ms.append(point[0])
-        rel_times_ms.append(point[1])
-        times_str.append(point[2])
-        speeds_kmh.append(point[3])
-        num_sats = point[5] if len(point) > 5 else None
-        hdop_val = point[6] if len(point) > 6 else None
-        valid = True
-        if (num_sats is not None and num_sats < config.MIN_SATELLITES) or (hdop_val is not None and hdop_val > hdop_threshold):
-            valid = False
-        valid_flags.append(valid)
+    # Build validity mask using vectorised operations
+    valid_flags = np.ones(n_points, dtype=bool)
 
-    time_seconds = [t / 1000.0 for t in rel_times_ms]
+    # Satellite-based validity: only when value is present (>=0)
+    min_sats = config.MIN_SATELLITES
+    sats_known = num_sats_arr >= 0
+    sats_low = sats_known & (num_sats_arr < min_sats)
+    valid_flags[sats_low] = False
 
-    time_seconds = np.array(time_seconds)
-    speeds_ms = np.array(speeds_kmh) / 3.6
+    # HDOP-based validity: check against threshold
+    hdop_array = hdop_per_point
+    hdop_bad = hdop_array > hdop_threshold
+    valid_flags[hdop_bad] = False
+
+    # Convert times/speeds to NumPy arrays
+    time_seconds = rel_times_ms.astype(float) / 1000.0
+    speeds_ms = speeds_kmh / 3.6
 
     # Extract vehicle parameters (needed for two-pass calculation)
     mass = validate_param("mass", car_info.get("mass"), 1500, min_value=100)
@@ -149,13 +170,6 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
 
     pre_kalman_valid_indices = pre_kalman_stats['valid_indices']
     min_valid_points = getattr(config, 'PRE_KALMAN_MIN_VALID_POINTS', 10)
-
-    # Collect HDOP for each point (for adaptive Kalman)
-    hdop_per_point = []
-    for point in speed_data:
-        hdop_val = point[6] if len(point) > 6 and point[6] is not None else hdop_fallback
-        hdop_per_point.append(hdop_val)
-    hdop_per_point = np.array(hdop_per_point)
 
     # Check: enough valid points?
     if len(pre_kalman_valid_indices) >= min_valid_points:
@@ -264,9 +278,6 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
                 if spd < speed_percentile_low or spd > speed_percentile_high:
                     valid_flags[i] = False
 
-    power_time_series.clear()
-    power_speed_data.clear()
-
     g = config.GRAVITY
     rolling_resistance = car_info.get("rolling_resistance", 0.015)
     rho = config.AIR_DENSITY
@@ -300,8 +311,8 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
             alt_values = []
 
             for point in altitude_data:
-                alt_abs_times_ms.append(point[0])
-                alt_values.append(point[3])
+                alt_abs_times_ms.append(point[ALT_ABS_MS])
+                alt_values.append(point[ALT_ALTITUDE_M])
 
             if len(alt_values) > 2:
                 first_timestamp_sec_val = 0.0
@@ -367,35 +378,46 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
         except Exception as e:
             logger.error(f"Error processing altitude data: {e}")
 
-    for i in range(len(speeds_smooth)):
-        v = speeds_smooth[i]
+    # === VECTORISED POWER CALCULATION ===
+    v = speeds_smooth
 
-        air_resistance = 0.5 * rho * drag_coefficient * frontal_area * v**2
-        rolling_force = mass * g * rolling_resistance
-        acceleration_force = mass * acceleration_smooth[i]
-        slope_force = mass * g * slopes[i]
+    air_resistance_force = 0.5 * rho * drag_coefficient * frontal_area * v**2
+    rolling_force = mass * g * rolling_resistance
+    acceleration_force = mass * acceleration_smooth
+    slope_force = mass * g * slopes
 
-        total_force = air_resistance + rolling_force + acceleration_force + slope_force
-        power = max(total_force * v, 0)
-        power_hp = power / watts_to_hp
+    total_force = air_resistance_force + rolling_force + acceleration_force + slope_force
+    power_watts = np.maximum(total_force * v, 0.0)
+    power_hp_array = power_watts / watts_to_hp
 
-        power_time_series.append((time_seconds[i], power_hp))
+    # Component powers (for time plots)
+    air_resistance_power_hp = (air_resistance_force * v) / watts_to_hp
+    rolling_force_power_hp = (rolling_force * v) / watts_to_hp
+    acceleration_force_power_hp = (acceleration_force * v) / watts_to_hp
+    slope_force_power_hp = (slope_force * v) / watts_to_hp
 
-        air_resistance_power_hp = (air_resistance * v) / watts_to_hp
-        rolling_force_power_hp = (rolling_force * v) / watts_to_hp
-        acceleration_force_power_hp = (acceleration_force * v) / watts_to_hp
-        slope_force_power_hp = (slope_force * v) / watts_to_hp
+    # Convert to Python lists of tuples for public API
+    time_list = time_seconds.tolist()
+    power_list = power_hp_array.tolist()
+    air_list = air_resistance_power_hp.tolist()
+    roll_list = rolling_force_power_hp.tolist()
+    accel_list = acceleration_force_power_hp.tolist()
+    slope_list = slope_force_power_hp.tolist()
 
-        air_resistance_series.append((time_seconds[i], air_resistance_power_hp))
-        rolling_force_series.append((time_seconds[i], rolling_force_power_hp))
-        acceleration_force_series.append((time_seconds[i], acceleration_force_power_hp))
-        slope_force_series.append((time_seconds[i], slope_force_power_hp))
+    power_time_series = list(zip(time_list, power_list))
+    air_resistance_series = list(zip(time_list, air_list))
+    rolling_force_series = list(zip(time_list, roll_list))
+    acceleration_force_series = list(zip(time_list, accel_list))
+    slope_force_series = list(zip(time_list, slope_list))
 
-        speed_kmh = speeds_smooth[i] * 3.6
-        is_valid = valid_flags[i] if i < len(valid_flags) else True
-        power_speed_data.append((speed_kmh, power_hp, is_valid))
+    speed_kmh_array = v * 3.6
+    valid_flags_list = valid_flags.tolist()
+    power_speed_data = list(zip(speed_kmh_array.tolist(), power_list, valid_flags_list))
 
-    valid_power_speed = [p for p in power_speed_data if len(p) < 3 or p[2]]
+    valid_power_speed = [
+        p for p in power_speed_data
+        if len(p) <= 2 or p[2]
+    ]
     powers = [p[1] for p in valid_power_speed]
 
     total_points = len(power_speed_data)
@@ -518,7 +540,7 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
         'filter': 'kalman',
         'dt': float(time_seconds[1] - time_seconds[0]) if len(time_seconds) > 1 else 0.0,
         'time_map': time_map,
-        'first_timestamp_ms': abs_times_ms[0] if abs_times_ms else None,
+        'first_timestamp_ms': int(abs_times_ms[0]) if len(abs_times_ms) > 0 else None,
         'hdop_statistics': hdop_statistics,
         'pre_kalman_stats': pre_kalman_stats,
         'filtered_ratio': filtered_ratio,

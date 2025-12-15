@@ -30,6 +30,12 @@ try:
 except ImportError:
     import config
 
+try:
+    # Tuple index constants documenting the layout of speed_data
+    from .structures import SPEED_NUM_SATS, SPEED_HDOP
+except ImportError:  # pragma: no cover - fallback for direct script execution
+    from core.structures import SPEED_NUM_SATS, SPEED_HDOP
+
 
 def kalman_cv(meas, times, q=None, r=None):
     """
@@ -285,8 +291,8 @@ def pre_kalman_filter(speed_data, hdop_threshold):
     pre_kalman_hdop = hdop_threshold * hdop_multiplier
 
     for i, point in enumerate(speed_data):
-        num_sats = point[5] if len(point) > 5 else None
-        hdop_val = point[6] if len(point) > 6 else None
+        num_sats = point[SPEED_NUM_SATS] if len(point) > SPEED_NUM_SATS else None
+        hdop_val = point[SPEED_HDOP] if len(point) > SPEED_HDOP else None
 
         low_sats = num_sats is not None and num_sats < min_sats
         high_hdop = hdop_val is not None and hdop_val > pre_kalman_hdop

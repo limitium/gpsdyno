@@ -30,6 +30,20 @@ if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
 import config
+from core.structures import (
+    SPEED_ABS_MS,
+    SPEED_REL_MS,
+    SPEED_TIME_STR,
+    SPEED_SPEED_KMH,
+    SPEED_NMEA_LINE,
+    SPEED_NUM_SATS,
+    SPEED_HDOP,
+    ALT_ABS_MS,
+    ALT_REL_MS,
+    ALT_TIME_STR,
+    ALT_ALTITUDE_M,
+    ALT_NMEA_LINE,
+)
 
 logger = logging.getLogger('nmea_handler')
 
@@ -327,7 +341,17 @@ def extract_speed_altitude_data(file_path):
                             first_timestamp_ms = timestamp_ms
 
                         relative_ms = timestamp_ms - first_timestamp_ms if first_timestamp_ms is not None else 0
-                        speed_data.append((timestamp_ms, relative_ms, timestamp_str, speed_kph, orig_line, None, None))
+                        speed_data.append(
+                            (
+                                timestamp_ms,      # SPEED_ABS_MS
+                                relative_ms,       # SPEED_REL_MS
+                                timestamp_str,     # SPEED_TIME_STR
+                                speed_kph,         # SPEED_SPEED_KMH
+                                orig_line,         # SPEED_NMEA_LINE
+                                None,              # SPEED_NUM_SATS (to be filled from GGA)
+                                None,              # SPEED_HDOP (to be filled from GGA)
+                            )
+                        )
                         rmc_index_by_ts[timestamp_ms] = len(speed_data) - 1
                         nmea_lines[timestamp_str] = orig_line
 
@@ -374,7 +398,15 @@ def extract_speed_altitude_data(file_path):
                         num_sats = int(msg.num_sats) if getattr(msg, 'num_sats', None) not in (None, '') else None
                         hdop_val = float(msg.horizontal_dil) if getattr(msg, 'horizontal_dil', None) not in (None, '') else None
                         gga_quality[timestamp_ms] = (num_sats, hdop_val)
-                        altitude_data.append((timestamp_ms, relative_ms, timestamp_str, altitude_m, orig_line))
+                        altitude_data.append(
+                            (
+                                timestamp_ms,   # ALT_ABS_MS
+                                relative_ms,    # ALT_REL_MS
+                                timestamp_str,  # ALT_TIME_STR
+                                altitude_m,     # ALT_ALTITUDE_M
+                                orig_line,      # ALT_NMEA_LINE
+                            )
+                        )
                         nmea_lines[timestamp_str] = orig_line
 
                         if hasattr(msg, 'latitude') and hasattr(msg, 'longitude'):
@@ -384,10 +416,10 @@ def extract_speed_altitude_data(file_path):
                         if timestamp_ms in rmc_index_by_ts:
                             idx = rmc_index_by_ts[timestamp_ms]
                             existing = list(speed_data[idx])
-                            if len(existing) < 7:
-                                existing += [None] * (7 - len(existing))
-                            existing[5] = num_sats
-                            existing[6] = hdop_val
+                            if len(existing) < (SPEED_HDOP + 1):
+                                existing += [None] * ((SPEED_HDOP + 1) - len(existing))
+                            existing[SPEED_NUM_SATS] = num_sats
+                            existing[SPEED_HDOP] = hdop_val
                             speed_data[idx] = tuple(existing)
                     else:
                         logger.debug(f"Skipped NMEA GGA line due to missing timestamp or altitude: {orig_line}")
@@ -400,18 +432,22 @@ def extract_speed_altitude_data(file_path):
                     continue
 
         for idx, entry in enumerate(speed_data):
-            if len(entry) < 7 or entry[5] is None or entry[6] is None:
-                ts = entry[0]
+            if (
+                len(entry) <= SPEED_HDOP
+                or entry[SPEED_NUM_SATS] is None
+                or entry[SPEED_HDOP] is None
+            ):
+                ts = entry[SPEED_ABS_MS]
                 if ts in gga_quality:
                     num_s, hd = gga_quality[ts]
                     updated = list(entry)
-                    if len(updated) < 7:
-                        updated += [None] * (7 - len(updated))
-                    updated[5] = num_s
-                    updated[6] = hd
+                    if len(updated) < (SPEED_HDOP + 1):
+                        updated += [None] * ((SPEED_HDOP + 1) - len(updated))
+                    updated[SPEED_NUM_SATS] = num_s
+                    updated[SPEED_HDOP] = hd
                     speed_data[idx] = tuple(updated)
 
-        timestamp_milliseconds = [t[0] for t in speed_data] if speed_data else []
+        timestamp_milliseconds = [t[SPEED_ABS_MS] for t in speed_data] if speed_data else []
         gps_frequency = calculate_gps_frequency(timestamp_milliseconds)
 
         return speed_data, altitude_data, gps_frequency, nmea_lines, first_timestamp_ms, coords_data
