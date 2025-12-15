@@ -1,0 +1,560 @@
+{
+  "2105 - turbo - Grade4_1020.nmea": {
+    "weight": 1020,
+    "speed_data_points": 1802,
+    "altitude_data_points": 1802,
+    "gps_frequency": 16.12,
+    "performance": {
+      "peak_detection_time_seconds": 0.12650675000622869,
+      "all_methods_time_seconds": 0.1168581250240095
+    },
+    "performance_100_runs": null,
+    "peak_detection": {
+      "recommended_value": 222.16031847163157,
+      "recommended_method": "peak_detection",
+      "valid_points": 1030,
+      "total_points": 1802,
+      "filtered_ratio": 0.42841287458379573
+    },
+    "all_methods": {
+      "consistency_score": 1.0,
+      "methods_cv": 0.007963581547126486,
+      "robust_mean": {
+        "value": 224.91088502115377,
+        "std": 3.328252975432999
+      },
+      "percentile_99": {
+        "value": 227.52399933748592
+      },
+      "mode_kde": {
+        "value": 223.41728808037047,
+        "kde_max": 0.1296660406544802
+      },
+      "peak_detection": {
+        "value": 222.16031847163157,
+        "peak_count": 6
+      },
+      "consistency": {
+        "value": 224.35307193368453,
+        "std": 11.323561821785919,
+        "segments_used": 5
+      }
+    },
+    "hdop_statistics": {
+      "threshold": 0.6,
+      "mean": 0.5999999999999999,
+      "min": 0.6,
+      "max": 0.6,
+      "median": 0.6
+    },
+    "pre_kalman_stats": {
+      "filtered_ratio": 0.0,
+      "filtered_count": 0,
+      "valid_count": 1802
+    },
+    "uncertainty": {
+      "total_hp": 5.5,
+      "range": [
+        216.7,
+        227.7
+      ]
+    },
+    "power_time_sample": {
+      "first": [
+        0.0,
+        23.891791235414257
+      ],
+      "middle": [
+        55.86,
+        179.73634663234694
+      ],
+      "last": [
+        111.72,
+        0.0
+      ],
+      "max_power": 233.27346271282647
+    },
+    "power_speed_sample": {
+      "max_speed": 183.6226246656396,
+      "max_power": 233.27346271282647,
+      "valid_points": 1030
+    }
+  },
+  "2108_delta_adm_970.nmea": {
+    "weight": 970,
+    "speed_data_points": 1362,
+    "altitude_data_points": 1362,
+    "gps_frequency": 16.13,
+    "performance": {
+      "peak_detection_time_seconds": 0.08852854097494856,
+      "all_methods_time_seconds": 0.08821512502618134
+    },
+    "performance_100_runs": null,
+    "peak_detection": {
+      "recommended_value": 107.17163086578134,
+      "recommended_method": "peak_detection",
+      "valid_points": 612,
+      "total_points": 1362,
+      "filtered_ratio": 0.5506607929515419
+    },
+    "all_methods": {
+      "consistency_score": 1.0,
+      "methods_cv": 0.011611852708925677,
+      "robust_mean": {
+        "value": 107.94874181102479,
+        "std": 1.7308320753218904
+      },
+      "percentile_99": {
+        "value": 110.01391881306269
+      },
+      "mode_kde": {
+        "value": 106.75370574246595,
+        "kde_max": 0.21374051521542264
+      },
+      "peak_detection": {
+        "value": 107.17163086578134,
+        "peak_count": 6
+      },
+      "consistency": {
+        "value": 106.59152890090371,
+        "std": 3.6889759083838456,
+        "segments_used": 5
+      }
+    },
+    "hdop_statistics": {
+      "threshold": 0.7,
+      "mean": 0.6861967694566814,
+      "min": 0.6,
+      "max": 1.1,
+      "median": 0.6
+    },
+    "pre_kalman_stats": {
+      "filtered_ratio": 0.005873715124816446,
+      "filtered_count": 8,
+      "valid_count": 1354
+    },
+    "uncertainty": {
+      "total_hp": 2.7,
+      "range": [
+        104.5,
+        109.9
+      ]
+    },
+    "power_time_sample": {
+      "first": [
+        0.0,
+        16.57266046664661
+      ],
+      "middle": [
+        42.22,
+        57.489227627502316
+      ],
+      "last": [
+        84.38,
+        6.262901970372168
+      ],
+      "max_power": 114.51051874706206
+    },
+    "power_speed_sample": {
+      "max_speed": 130.93234102652394,
+      "max_power": 110.96761012841914,
+      "valid_points": 612
+    }
+  },
+  "dragy_bmw_e36_mrw_1300.nmea": {
+    "weight": 1300,
+    "speed_data_points": 1305,
+    "altitude_data_points": 1305,
+    "gps_frequency": 10.0,
+    "performance": {
+      "peak_detection_time_seconds": 0.08535195799777284,
+      "all_methods_time_seconds": 0.09807995799928904
+    },
+    "performance_100_runs": null,
+    "peak_detection": {
+      "recommended_value": 243.79812442633303,
+      "recommended_method": "peak_detection",
+      "valid_points": 734,
+      "total_points": 1305,
+      "filtered_ratio": 0.4375478927203065
+    },
+    "all_methods": {
+      "consistency_score": 1.0,
+      "methods_cv": 0.018825430946234862,
+      "robust_mean": {
+        "value": 242.2308391246583,
+        "std": 2.7001545351816345
+      },
+      "percentile_99": {
+        "value": 244.88115963672834
+      },
+      "mode_kde": {
+        "value": 241.22802600238006,
+        "kde_max": 0.12181847596962225
+      },
+      "peak_detection": {
+        "value": 243.79812442633303,
+        "peak_count": 6
+      },
+      "consistency": {
+        "value": 232.14340351416303,
+        "std": 12.381912720415764,
+        "segments_used": 5
+      }
+    },
+    "hdop_statistics": null,
+    "pre_kalman_stats": {
+      "filtered_ratio": 0.0,
+      "filtered_count": 0,
+      "valid_count": 1305
+    },
+    "uncertainty": {
+      "total_hp": 5.6,
+      "range": [
+        238.2,
+        249.4
+      ]
+    },
+    "power_time_sample": {
+      "first": [
+        0.0,
+        25.509101754127624
+      ],
+      "middle": [
+        65.2,
+        24.082541390699266
+      ],
+      "last": [
+        130.4,
+        0.0
+      ],
+      "max_power": 247.69505608116503
+    },
+    "power_speed_sample": {
+      "max_speed": 189.21116146002706,
+      "max_power": 247.69505608116503,
+      "valid_points": 734
+    }
+  },
+  "lada_kalina_2_sport_mrw_1010.nmea": {
+    "weight": 1010,
+    "speed_data_points": 1373,
+    "altitude_data_points": 1373,
+    "gps_frequency": 9.99,
+    "performance": {
+      "peak_detection_time_seconds": 0.09054083295632154,
+      "all_methods_time_seconds": 0.0888596250442788
+    },
+    "performance_100_runs": null,
+    "peak_detection": {
+      "recommended_value": 113.92102535175646,
+      "recommended_method": "peak_detection",
+      "valid_points": 906,
+      "total_points": 1373,
+      "filtered_ratio": 0.34013109978150036
+    },
+    "all_methods": {
+      "consistency_score": 1.0,
+      "methods_cv": 0.004516995076052582,
+      "robust_mean": {
+        "value": 113.2739886764839,
+        "std": 2.377131107686267
+      },
+      "percentile_99": {
+        "value": 114.1913204741541
+      },
+      "mode_kde": {
+        "value": 112.7446929282646,
+        "kde_max": 0.21724966591943223
+      },
+      "peak_detection": {
+        "value": 113.92102535175646,
+        "peak_count": 11
+      },
+      "consistency": {
+        "value": 113.76614076132991,
+        "std": 3.3505581651391507,
+        "segments_used": 5
+      }
+    },
+    "hdop_statistics": null,
+    "pre_kalman_stats": {
+      "filtered_ratio": 0.0,
+      "filtered_count": 0,
+      "valid_count": 1373
+    },
+    "uncertainty": {
+      "total_hp": 2.9,
+      "range": [
+        111.0,
+        116.8
+      ]
+    },
+    "power_time_sample": {
+      "first": [
+        0.0,
+        18.76916755126349
+      ],
+      "middle": [
+        68.6,
+        9.421565183941645
+      ],
+      "last": [
+        137.3,
+        54.92208114734342
+      ],
+      "max_power": 121.4857533064759
+    },
+    "power_speed_sample": {
+      "max_speed": 164.30810917158573,
+      "max_power": 121.4857533064759,
+      "valid_points": 906
+    }
+  },
+  "renault_megane_3_rs_mrw_2_1350.nmea": {
+    "weight": 1350,
+    "speed_data_points": 1079,
+    "altitude_data_points": 1079,
+    "gps_frequency": 10.0,
+    "performance": {
+      "peak_detection_time_seconds": 0.07184749998850748,
+      "all_methods_time_seconds": 0.07109933299943805
+    },
+    "performance_100_runs": null,
+    "peak_detection": {
+      "recommended_value": 300.0757004740051,
+      "recommended_method": "peak_detection",
+      "valid_points": 567,
+      "total_points": 1079,
+      "filtered_ratio": 0.47451343836886006
+    },
+    "all_methods": {
+      "consistency_score": 1.0,
+      "methods_cv": 0.01497377560957433,
+      "robust_mean": {
+        "value": 304.4289247900758,
+        "std": 4.554128522585252
+      },
+      "percentile_99": {
+        "value": 309.784174150503
+      },
+      "mode_kde": {
+        "value": 301.86657199805853,
+        "kde_max": 0.08604722073530507
+      },
+      "peak_detection": {
+        "value": 300.0757004740051,
+        "peak_count": 6
+      },
+      "consistency": {
+        "value": 296.21412751444876,
+        "std": 8.546739453469787,
+        "segments_used": 5
+      }
+    },
+    "hdop_statistics": {
+      "threshold": 0.6,
+      "mean": 0.6101019462465245,
+      "min": 0.6,
+      "max": 0.7,
+      "median": 0.6
+    },
+    "pre_kalman_stats": {
+      "filtered_ratio": 0.0,
+      "filtered_count": 0,
+      "valid_count": 1079
+    },
+    "uncertainty": {
+      "total_hp": 6.8,
+      "range": [
+        293.3,
+        306.9
+      ]
+    },
+    "power_time_sample": {
+      "first": [
+        0.0,
+        34.0068275228929
+      ],
+      "middle": [
+        53.9,
+        289.39456363997755
+      ],
+      "last": [
+        107.8,
+        0.0
+      ],
+      "max_power": 313.03683529227396
+    },
+    "power_speed_sample": {
+      "max_speed": 190.046925246621,
+      "max_power": 313.03683529227396,
+      "valid_points": 567
+    }
+  },
+  "subaru_brz_gen2_mrw_1350.nmea": {
+    "weight": 1350,
+    "speed_data_points": 2102,
+    "altitude_data_points": 2102,
+    "gps_frequency": 16.12,
+    "performance": {
+      "peak_detection_time_seconds": 0.13,
+      "all_methods_time_seconds": 0.13
+    },
+    "performance_100_runs": {
+      "peak_detection_total_seconds": 13.0,
+      "all_methods_total_seconds": 13.0
+    },
+    "peak_detection": {
+      "recommended_value": 217.659996709644,
+      "recommended_method": "peak_detection",
+      "valid_points": 1257,
+      "total_points": 2102,
+      "filtered_ratio": 0.4019980970504282
+    },
+    "all_methods": {
+      "consistency_score": 0.9206323826753025,
+      "methods_cv": 0.03031779025221068,
+      "robust_mean": {
+        "value": 230.22757766125082,
+        "std": 7.577825276563671
+      },
+      "percentile_99": {
+        "value": 237.84363481564318
+      },
+      "mode_kde": {
+        "value": 227.2858349673287,
+        "kde_max": 0.046847767409609345
+      },
+      "peak_detection": {
+        "value": 217.659996709644,
+        "peak_count": 12
+      },
+      "consistency": {
+        "value": 234.68900405580484,
+        "std": 10.178094848966127,
+        "segments_used": 5
+      }
+    },
+    "hdop_statistics": {
+      "threshold": 0.8,
+      "mean": 0.6892483349191246,
+      "min": 0.6,
+      "max": 1.0,
+      "median": 0.6
+    },
+    "pre_kalman_stats": {
+      "filtered_ratio": 0.0,
+      "filtered_count": 0,
+      "valid_count": 2102
+    },
+    "uncertainty": {
+      "total_hp": 6.0,
+      "range": [
+        211.7,
+        223.7
+      ]
+    },
+    "power_time_sample": {
+      "first": [
+        0.0,
+        19.769282892001968
+      ],
+      "middle": [
+        65.16,
+        0.0
+      ],
+      "last": [
+        130.32,
+        37.40508577632781
+      ],
+      "max_power": 249.89954870211258
+    },
+    "power_speed_sample": {
+      "max_speed": 186.19405972320516,
+      "max_power": 248.96780837528902,
+      "valid_points": 1257
+    }
+  },
+  "subaru_sti_mrw_1440.nmea": {
+    "weight": 1440,
+    "speed_data_points": 2049,
+    "altitude_data_points": 2049,
+    "gps_frequency": 16.11,
+    "performance": {
+      "peak_detection_time_seconds": 0.13326387497363612,
+      "all_methods_time_seconds": 0.13736608298495412
+    },
+    "performance_100_runs": null,
+    "peak_detection": {
+      "recommended_value": 313.25006002260375,
+      "recommended_method": "peak_detection",
+      "valid_points": 1014,
+      "total_points": 2049,
+      "filtered_ratio": 0.5051244509516837
+    },
+    "all_methods": {
+      "consistency_score": 1.0,
+      "methods_cv": 0.007417610860875283,
+      "robust_mean": {
+        "value": 315.77777545777815,
+        "std": 7.920639786104141
+      },
+      "percentile_99": {
+        "value": 319.9189422053996
+      },
+      "mode_kde": {
+        "value": 314.297540262088,
+        "kde_max": 0.06006669085623693
+      },
+      "peak_detection": {
+        "value": 313.25006002260375,
+        "peak_count": 11
+      },
+      "consistency": {
+        "value": 317.29616832142653,
+        "std": 11.315878623611342,
+        "segments_used": 5
+      }
+    },
+    "hdop_statistics": {
+      "threshold": 0.7,
+      "mean": 0.664665690580771,
+      "min": 0.6,
+      "max": 0.9,
+      "median": 0.7
+    },
+    "pre_kalman_stats": {
+      "filtered_ratio": 0.0,
+      "filtered_count": 0,
+      "valid_count": 2049
+    },
+    "uncertainty": {
+      "total_hp": 7.2,
+      "range": [
+        306.1,
+        320.5
+      ]
+    },
+    "power_time_sample": {
+      "first": [
+        0.0,
+        29.629476569415438
+      ],
+      "middle": [
+        63.49,
+        0.0
+      ],
+      "last": [
+        127.1,
+        0.0
+      ],
+      "max_power": 341.4062637897349
+    },
+    "power_speed_sample": {
+      "max_speed": 200.3895915461472,
+      "max_power": 341.4062637897349,
+      "valid_points": 1014
+    }
+  }
+}
