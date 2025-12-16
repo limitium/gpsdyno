@@ -42,14 +42,13 @@ from parsers.nmea_handler import (
 import config
 from locales.strings import ERRORS
 
-logging.basicConfig(level=logging.ERROR, format='%(levelname)s: %(message)s', stream=sys.stderr)
+# Configure logging (basicConfig is sufficient, no need for duplicate handler)
+logging.basicConfig(
+    level=logging.ERROR,
+    format='%(levelname)s: %(message)s',
+    stream=sys.stderr
+)
 logger = logging.getLogger('gpsdyno_calculator')
-
-console_handler = logging.StreamHandler(sys.stderr)
-console_handler.setLevel(logging.ERROR)
-formatter = logging.Formatter('%(levelname)s: %(message)s')
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
 
 
 def format_duration_ms(duration_ms):

@@ -73,4 +73,21 @@ POWER_SPEED_SPEED_KMH = 0
 POWER_SPEED_POWER_HP = 1
 POWER_SPEED_IS_VALID = 2
 
+# Unit conversion constants
+KMH_TO_MS = 3.6  # km/h to m/s conversion factor
+MS_TO_KMH = 1.0 / 3.6  # m/s to km/h conversion factor
+MS_TO_S = 1000.0  # milliseconds to seconds conversion factor
+PERCENT_TO_DECIMAL = 100.0  # percentage to decimal (e.g., 95 -> 0.95)
+
+# Uncertainty calculation constants
+HIGH_POWER_THRESHOLD_RATIO = 0.9  # Use points with power >= 90% of max for uncertainty
+DEFAULT_ACCELERATION_MS2 = 1.0  # Default acceleration when no high-power data available
+DEFAULT_GPS_FREQUENCY_HZ = 10.0  # Default GPS frequency when cannot be calculated
+DEFAULT_HDOP_MEAN = 1.0  # Default HDOP mean when statistics unavailable
+DEFAULT_CONSISTENCY_SCORE = 0.85  # Default consistency score when not computed
+FALLBACK_MAX_POWER_SPEED_KMH = 150.0  # Fallback speed when no valid power data
+
+# Physics constants
+AERODYNAMIC_FORCE_COEFFICIENT = 0.5  # Coefficient for aerodynamic force: 0.5 * rho * Cd * A * v²
+
 

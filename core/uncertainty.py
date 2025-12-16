@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # GPSDyno - GPS-based vehicle power calculator
 # Copyright (C) 2024 GPSDyno Contributors
 #
@@ -27,9 +28,18 @@ Outputs worst-case bounds.
 """
 from dataclasses import dataclass
 from typing import Optional
+
 import numpy as np
 
-import config
+try:
+    from .. import config
+except ImportError:
+    import config
+
+from .structures import KMH_TO_MS
+
+# Use WATTS_TO_HP from config (avoid duplication)
+WATTS_TO_HP = getattr(config, 'WATTS_TO_HP', 735.5)
 
 
 # Watts to WHP conversion constant
@@ -75,16 +85,18 @@ def calculate_wind_uncertainty(
 
     # Apply angle coefficient (0.7 ≈ cos(45°) — wind rarely strictly along)
     angle_factor = getattr(config, 'UNCERTAINTY_WIND_ANGLE_FACTOR', 0.7)
-    v_wind_ms = wind_kph / 3.6 * angle_factor
+    v_wind_ms = wind_kph / KMH_TO_MS * angle_factor
 
     # Protection against negative effective speed with strong tailwind
     v_tail = max(v_car_ms - v_wind_ms, 0.1)
 
     # Power with headwind (worst case — more resistance)
-    p_headwind = 0.5 * rho * cd * frontal_area * (v_car_ms + v_wind_ms) ** 3
+    # Use aerodynamic force coefficient from structures
+    from .structures import AERODYNAMIC_FORCE_COEFFICIENT
+    p_headwind = AERODYNAMIC_FORCE_COEFFICIENT * rho * cd * frontal_area * (v_car_ms + v_wind_ms) ** 3
 
     # Power with tailwind (best case — less resistance)
-    p_tailwind = 0.5 * rho * cd * frontal_area * v_tail ** 3
+    p_tailwind = AERODYNAMIC_FORCE_COEFFICIENT * rho * cd * frontal_area * v_tail ** 3
 
     # Uncertainty = half the range (in WHP)
     delta_p = (p_headwind - p_tailwind) / 2 / WATTS_TO_HP

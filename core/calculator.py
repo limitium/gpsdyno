@@ -34,10 +34,16 @@ from .filters import (
     kalman_altitude,
     validate_param,
     apply_savgol_filter,
+    calculate_savgol_window_size,
     pre_kalman_filter,
 )
 from .density import calculate_power_estimation
 from .uncertainty import calculate_total_uncertainty
+from .helpers import (
+    calculate_air_density_from_weather,
+    process_altitude_data_for_slopes,
+    calculate_uncertainty_data,
+)
 from .structures import (
     SPEED_ABS_MS,
     SPEED_REL_MS,
@@ -47,6 +53,16 @@ from .structures import (
     SPEED_HDOP,
     ALT_ABS_MS,
     ALT_ALTITUDE_M,
+    KMH_TO_MS,
+    MS_TO_S,
+    PERCENT_TO_DECIMAL,
+    HIGH_POWER_THRESHOLD_RATIO,
+    DEFAULT_ACCELERATION_MS2,
+    DEFAULT_GPS_FREQUENCY_HZ,
+    DEFAULT_HDOP_MEAN,
+    DEFAULT_CONSISTENCY_SCORE,
+    FALLBACK_MAX_POWER_SPEED_KMH,
+    AERODYNAMIC_FORCE_COEFFICIENT,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,6 +108,31 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
         logger.warning("Insufficient speed data for power calculation")
         return None
 
+    # Cache frequently-used config values for performance
+    hdop_fallback = getattr(config, 'HDOP_FALLBACK_VALUE', 0.7)
+    hdop_min_bound = getattr(config, 'HDOP_MIN_BOUND', 0.5)
+    hdop_max_bound = getattr(config, 'HDOP_MAX_BOUND', 2.0)
+    min_satellites = config.MIN_SATELLITES
+    hdop_percentile = config.HDOP_PERCENTILE
+    pre_kalman_min_valid_points = getattr(config, 'PRE_KALMAN_MIN_VALID_POINTS', 10)
+    watts_to_hp = getattr(config, 'WATTS_TO_HP', 735.5)
+    speed_percentile_low = config.SPEED_PERCENTILE_LOW
+    speed_percentile_high = config.SPEED_PERCENTILE_HIGH
+    gravity = config.GRAVITY
+    air_density_default = config.AIR_DENSITY
+    r_dry_air = getattr(config, 'R_DRY_AIR', 287.058)
+    r_vapor = getattr(config, 'R_VAPOR', 461.495)
+    savgol_window_length = getattr(config, 'SAVGOL_WINDOW_LENGTH', 11)
+    savgol_window_divisor = getattr(config, 'SAVGOL_WINDOW_DIVISOR', 5)
+    min_distance_for_slope = getattr(config, 'MIN_DISTANCE_FOR_SLOPE', 0.5)
+    max_safe_slope = config.MAX_SAFE_SLOPE
+    kalman_low_power_filter_percentile = getattr(config, 'KALMAN_LOW_POWER_FILTER_PERCENTILE', 95)
+    kalman_hdop_factor = getattr(config, 'KALMAN_HDOP_FACTOR', 0.5)
+    kalman_speed_r = getattr(config, 'KALMAN_SPEED_R', 0.2)
+    kalman_r_min_multiplier = getattr(config, 'KALMAN_R_MIN_MULTIPLIER', 0.5)
+    kalman_r_max_multiplier = getattr(config, 'KALMAN_R_MAX_MULTIPLIER', 3.0)
+    uncertainty_mass_kg = getattr(config, 'UNCERTAINTY_MASS_KG', 20)
+
     n_points = len(speed_data)
 
     # Pre-allocate arrays/lists for speed_data fields
@@ -103,7 +144,6 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
     
     # Collect HDOP values for percentile calculation while unpacking tuples
     # Use fallback value for missing HDOP (matching old behavior)
-    hdop_fallback = getattr(config, 'HDOP_FALLBACK_VALUE', 0.7)
     hdop_per_point = np.full(n_points, hdop_fallback, dtype=float)
     hdop_values = []
     for i, point in enumerate(speed_data):
@@ -127,11 +167,9 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
     hdop_threshold = hdop_fallback  # Default fallback
     hdop_statistics = None
     if hdop_values:
-        hdop_threshold = np.percentile(hdop_values, config.HDOP_PERCENTILE)
+        hdop_threshold = np.percentile(hdop_values, hdop_percentile)
         # Ensure reasonable bounds
-        hdop_min = getattr(config, 'HDOP_MIN_BOUND', 0.5)
-        hdop_max = getattr(config, 'HDOP_MAX_BOUND', 2.0)
-        hdop_threshold = max(hdop_min, min(hdop_threshold, hdop_max))
+        hdop_threshold = max(hdop_min_bound, min(hdop_threshold, hdop_max_bound))
         hdop_statistics = {
             'threshold': hdop_threshold,
             'percentile': config.HDOP_PERCENTILE,
@@ -142,23 +180,21 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
             'count': len(hdop_values)
         }
 
-    # Build validity mask using vectorised operations
+    # Build validity mask using vectorized operations
     valid_flags = np.ones(n_points, dtype=bool)
 
     # Satellite-based validity: only when value is present (>=0)
-    min_sats = config.MIN_SATELLITES
     sats_known = num_sats_arr >= 0
-    sats_low = sats_known & (num_sats_arr < min_sats)
+    sats_low = sats_known & (num_sats_arr < min_satellites)
     valid_flags[sats_low] = False
 
     # HDOP-based validity: check against threshold
-    hdop_array = hdop_per_point
-    hdop_bad = hdop_array > hdop_threshold
+    hdop_bad = hdop_per_point > hdop_threshold
     valid_flags[hdop_bad] = False
 
     # Convert times/speeds to NumPy arrays
-    time_seconds = rel_times_ms.astype(float) / 1000.0
-    speeds_ms = speeds_kmh / 3.6
+    time_seconds = rel_times_ms.astype(float) / MS_TO_S
+    speeds_ms = speeds_kmh / KMH_TO_MS
 
     # Extract vehicle parameters (needed for two-pass calculation)
     mass = validate_param("mass", car_info.get("mass"), 1500, min_value=100)
@@ -169,10 +205,9 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
     pre_kalman_stats = pre_kalman_filter(speed_data, hdop_threshold)
 
     pre_kalman_valid_indices = pre_kalman_stats['valid_indices']
-    min_valid_points = getattr(config, 'PRE_KALMAN_MIN_VALID_POINTS', 10)
 
     # Check: enough valid points?
-    if len(pre_kalman_valid_indices) >= min_valid_points:
+    if len(pre_kalman_valid_indices) >= pre_kalman_min_valid_points:
         # Extract valid data for Kalman
         time_seconds_valid = time_seconds[pre_kalman_valid_indices]
         speeds_ms_valid = speeds_ms[pre_kalman_valid_indices]
@@ -184,21 +219,16 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
         speeds_smooth_pass1, acceleration_smooth_pass1 = kalman_cv(speeds_ms_valid, time_seconds_valid)
 
         # Rough power estimate for first pass (inertia + aerodynamics only)
-        watts_to_hp = getattr(config, 'WATTS_TO_HP', 735.5)
-        rough_power = []
-        for i in range(len(speeds_smooth_pass1)):
-            v = speeds_smooth_pass1[i]
-            a = acceleration_smooth_pass1[i]
-            # Simplified formula: P ≈ m*a*v + 0.5*rho*Cd*A*v³
-            p_inertia = mass * a * v
-            p_aero = 0.5 * config.AIR_DENSITY * drag_coefficient * frontal_area * v**3
-            rough_power.append(max(p_inertia + p_aero, 0) / watts_to_hp)
-        rough_power = np.array(rough_power)
+        # Vectorized calculation
+        v_pass1 = speeds_smooth_pass1
+        a_pass1 = acceleration_smooth_pass1
+        p_inertia = mass * a_pass1 * v_pass1
+        p_aero = AERODYNAMIC_FORCE_COEFFICIENT * air_density_default * drag_coefficient * frontal_area * v_pass1**3
+        rough_power = np.maximum(p_inertia + p_aero, 0.0) / watts_to_hp
 
         # === FILTER AND DISCARD LOW POWER ZONE POINTS ===
-        low_power_filter_percentile = getattr(config, 'KALMAN_LOW_POWER_FILTER_PERCENTILE', 95)
         if len(rough_power) > 0 and np.max(rough_power) > 0:
-            cutoff_percentile = 100 - low_power_filter_percentile
+            cutoff_percentile = PERCENT_TO_DECIMAL - kalman_low_power_filter_percentile
             low_power_threshold = np.percentile(rough_power[rough_power > 0], cutoff_percentile)
             valid_power_mask = rough_power >= low_power_threshold
 
@@ -211,23 +241,21 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
             median_hdop_high_power = hdop_fallback
             valid_power_mask = np.ones(len(rough_power), dtype=bool)
 
-        # Mark low-power points as invalid
-        for idx, original_idx in enumerate(pre_kalman_valid_indices):
-            if not valid_power_mask[idx]:
-                valid_flags[original_idx] = False
+        # Mark low-power points as invalid (vectorized)
+        invalid_power_indices = pre_kalman_valid_indices[~valid_power_mask]
+        valid_flags[invalid_power_indices] = False
 
         # SECOND PASS: adaptive Kalman with HDOP-based R
-        hdop_factor = getattr(config, 'KALMAN_HDOP_FACTOR', 0.5)
-        base_r = getattr(config, 'KALMAN_SPEED_R', 0.2)
-        r_min_mult = getattr(config, 'KALMAN_R_MIN_MULTIPLIER', 0.5)
-        r_max_mult = getattr(config, 'KALMAN_R_MAX_MULTIPLIER', 3.0)
-
         if median_hdop_high_power > 0:
-            r_array_valid = base_r * (1 + hdop_factor * (hdop_valid / median_hdop_high_power))
+            r_array_valid = kalman_speed_r * (1 + kalman_hdop_factor * (hdop_valid / median_hdop_high_power))
         else:
-            r_array_valid = np.full_like(hdop_valid, base_r)
+            r_array_valid = np.full_like(hdop_valid, kalman_speed_r)
 
-        r_array_valid = np.clip(r_array_valid, base_r * r_min_mult, base_r * r_max_mult)
+        r_array_valid = np.clip(
+            r_array_valid,
+            kalman_speed_r * kalman_r_min_multiplier,
+            kalman_speed_r * kalman_r_max_multiplier
+        )
 
         speeds_smooth_valid, acceleration_smooth_valid = kalman_cv_adaptive(
             speeds_ms_valid, time_seconds_valid, r_array=r_array_valid
@@ -255,8 +283,8 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
         pre_kalman_stats['adaptive_kalman'] = {
             'median_hdop_valid_power': float(median_hdop_high_power),
             'valid_power_points': int(np.sum(valid_power_mask)),
-            'low_power_filter_percentile': low_power_filter_percentile,
-            'hdop_factor': hdop_factor
+            'low_power_filter_percentile': kalman_low_power_filter_percentile,
+            'hdop_factor': kalman_hdop_factor
         }
     else:
         logger.warning(f"Too few valid points after pre-Kalman filtering: {len(pre_kalman_valid_indices)}")
@@ -264,127 +292,50 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
         pre_kalman_stats['filtered_ratio'] = 0.0
 
     # === PERCENTILE FILTERING BY SMOOTHED SPEED ===
-    speeds_smooth_kmh = speeds_smooth * 3.6
+    speeds_smooth_kmh = speeds_smooth * KMH_TO_MS
 
-    valid_speeds = [speeds_smooth_kmh[i] for i in range(len(speeds_smooth_kmh)) if valid_flags[i]]
+    # Vectorized percentile filtering
+    valid_speeds = speeds_smooth_kmh[valid_flags]
+    if len(valid_speeds) > 0:
+        speed_cutoff_low = PERCENT_TO_DECIMAL - speed_percentile_low
+        speed_percentile_low_val = np.percentile(valid_speeds, speed_cutoff_low)
+        speed_percentile_high_val = np.percentile(valid_speeds, speed_percentile_high)
 
-    if valid_speeds:
-        speed_cutoff_low = 100 - config.SPEED_PERCENTILE_LOW
-        speed_percentile_low = np.percentile(valid_speeds, speed_cutoff_low)
-        speed_percentile_high = np.percentile(valid_speeds, config.SPEED_PERCENTILE_HIGH)
+        # Vectorized filtering: mark points outside percentile range as invalid
+        speed_out_of_range = (speeds_smooth_kmh < speed_percentile_low_val) | (speeds_smooth_kmh > speed_percentile_high_val)
+        valid_flags[speed_out_of_range] = False
 
-        for i, spd in enumerate(speeds_smooth_kmh):
-            if valid_flags[i]:
-                if spd < speed_percentile_low or spd > speed_percentile_high:
-                    valid_flags[i] = False
-
-    g = config.GRAVITY
     rolling_resistance = car_info.get("rolling_resistance", 0.015)
-    rho = config.AIR_DENSITY
-    watts_to_hp = getattr(config, 'WATTS_TO_HP', 735.5)
 
+    # Calculate air density from weather data if available
     if weather_data:
-        temp_c = weather_data.get("temperature_c", 20)
-        pressure_hpa = weather_data.get("pressure_hpa", 1013.25)
-        humidity = weather_data.get("humidity_percent", 50)
+        rho = calculate_air_density_from_weather(weather_data, r_dry_air, r_vapor)
+    else:
+        rho = air_density_default
 
-        temp_k = temp_c + 273.15
+    # Process altitude data to calculate slopes
+    slopes = process_altitude_data_for_slopes(
+        altitude_data,
+        time_seconds,
+        speeds_smooth,
+        first_timestamp_ms_arg,
+        kalman_altitude,
+        interp1d,
+        calculate_savgol_window_size,
+        apply_savgol_filter,
+        savgol_window_length,
+        savgol_window_divisor,
+        min_distance_for_slope,
+        max_safe_slope
+    )
 
-        R_d = getattr(config, 'R_DRY_AIR', 287.058)
-        R_v = getattr(config, 'R_VAPOR', 461.495)
-
-        pressure_pa = pressure_hpa * 100
-
-        P_sat_hpa = 6.1094 * np.exp((17.625 * temp_c) / (temp_c + 243.04))
-        P_sat_pa = P_sat_hpa * 100
-
-        P_v_pa = (humidity / 100.0) * P_sat_pa
-        P_d_pa = pressure_pa - P_v_pa
-
-        rho = (P_d_pa / (R_d * temp_k)) + (P_v_pa / (R_v * temp_k))
-
-    slopes = np.zeros_like(speeds_smooth)
-
-    if altitude_data and len(altitude_data) > 2:
-        try:
-            alt_abs_times_ms = []
-            alt_values = []
-
-            for point in altitude_data:
-                alt_abs_times_ms.append(point[ALT_ABS_MS])
-                alt_values.append(point[ALT_ALTITUDE_M])
-
-            if len(alt_values) > 2:
-                first_timestamp_sec_val = 0.0
-                if first_timestamp_ms_arg is not None:
-                    first_timestamp_sec_val = first_timestamp_ms_arg / 1000.0
-                else:
-                    if alt_abs_times_ms:
-                        first_timestamp_sec_val = alt_abs_times_ms[0] / 1000.0
-
-                alt_times_sec = np.array([(t / 1000.0) - first_timestamp_sec_val for t in alt_abs_times_ms])
-                alt_values = np.array(alt_values)
-
-                altitude_smooth = kalman_altitude(alt_values, alt_times_sec)
-
-                if len(alt_times_sec) != len(np.unique(alt_times_sec)):
-                    unique_times = np.unique(alt_times_sec)
-                    unique_values = np.zeros_like(unique_times)
-
-                    for i, t in enumerate(unique_times):
-                        idx = np.where(alt_times_sec == t)[0]
-                        unique_values[i] = np.mean(altitude_smooth[idx])
-
-                    alt_times_sec = unique_times
-                    altitude_smooth = unique_values
-
-                if len(alt_times_sec) > 1:
-                    alt_interp = interp1d(alt_times_sec, altitude_smooth,
-                                     kind='linear', bounds_error=False,
-                                     fill_value=(altitude_smooth[0], altitude_smooth[-1]))
-
-                    altitude_at_speed_times = alt_interp(time_seconds)
-
-                    distance_traveled = np.zeros_like(speeds_smooth)
-                    for i in range(1, len(speeds_smooth)):
-                        distance_traveled[i] = speeds_smooth[i] * (time_seconds[i] - time_seconds[i-1])
-
-                    savgol_window = getattr(config, 'SAVGOL_WINDOW_LENGTH', 11)
-                    savgol_divisor = getattr(config, 'SAVGOL_WINDOW_DIVISOR', 5)
-                    min_distance = getattr(config, 'MIN_DISTANCE_FOR_SLOPE', 0.5)
-
-                    distance_traveled_smooth = np.copy(distance_traveled)
-                    window_size = min(savgol_window, len(distance_traveled) // savgol_divisor)
-                    if window_size % 2 == 0:
-                        window_size = max(3, window_size - 1)
-                    distance_traveled_smooth = apply_savgol_filter(distance_traveled, window_size)
-
-                    distance_traveled_smooth = np.maximum(distance_traveled_smooth, 0)
-
-                    for i in range(1, len(speeds_smooth)):
-                        if distance_traveled_smooth[i] > min_distance:
-                            alt_change = altitude_at_speed_times[i] - altitude_at_speed_times[i-1]
-                            tan_slope = alt_change / distance_traveled_smooth[i]
-                            slopes[i] = tan_slope / np.sqrt(1 + tan_slope**2)
-
-                    max_safe_slope = config.MAX_SAFE_SLOPE
-                    slopes = np.clip(slopes, -max_safe_slope, max_safe_slope)
-
-                    window_size = min(savgol_window, len(slopes) // savgol_divisor)
-                    if window_size % 2 == 0:
-                        window_size = max(3, window_size - 1)
-                    slopes = apply_savgol_filter(slopes, window_size)
-
-        except Exception as e:
-            logger.error(f"Error processing altitude data: {e}")
-
-    # === VECTORISED POWER CALCULATION ===
+    # === VECTORIZED POWER CALCULATION ===
     v = speeds_smooth
 
-    air_resistance_force = 0.5 * rho * drag_coefficient * frontal_area * v**2
-    rolling_force = mass * g * rolling_resistance
+    air_resistance_force = AERODYNAMIC_FORCE_COEFFICIENT * rho * drag_coefficient * frontal_area * v**2
+    rolling_force = mass * gravity * rolling_resistance
     acceleration_force = mass * acceleration_smooth
-    slope_force = mass * g * slopes
+    slope_force = mass * gravity * slopes
 
     total_force = air_resistance_force + rolling_force + acceleration_force + slope_force
     power_watts = np.maximum(total_force * v, 0.0)
@@ -397,22 +348,24 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
     slope_force_power_hp = (slope_force * v) / watts_to_hp
 
     # Convert to Python lists of tuples for public API
+    # Use np.column_stack for efficient tuple creation, then convert to list
     time_list = time_seconds.tolist()
     power_list = power_hp_array.tolist()
-    air_list = air_resistance_power_hp.tolist()
-    roll_list = rolling_force_power_hp.tolist()
-    accel_list = acceleration_force_power_hp.tolist()
-    slope_list = slope_force_power_hp.tolist()
-
+    
+    # Create time series tuples more efficiently
     power_time_series = list(zip(time_list, power_list))
-    air_resistance_series = list(zip(time_list, air_list))
-    rolling_force_series = list(zip(time_list, roll_list))
-    acceleration_force_series = list(zip(time_list, accel_list))
-    slope_force_series = list(zip(time_list, slope_list))
+    air_resistance_series = list(zip(time_list, air_resistance_power_hp.tolist()))
+    rolling_force_series = list(zip(time_list, rolling_force_power_hp.tolist()))
+    acceleration_force_series = list(zip(time_list, acceleration_force_power_hp.tolist()))
+    slope_force_series = list(zip(time_list, slope_force_power_hp.tolist()))
 
-    speed_kmh_array = v * 3.6
-    valid_flags_list = valid_flags.tolist()
-    power_speed_data = list(zip(speed_kmh_array.tolist(), power_list, valid_flags_list))
+    # Create power_speed_data efficiently
+    speed_kmh_array = v * KMH_TO_MS
+    power_speed_data = list(zip(
+        speed_kmh_array.tolist(),
+        power_list,
+        valid_flags.tolist()
+    ))
 
     valid_power_speed = [
         p for p in power_speed_data
@@ -428,76 +381,47 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
 
     # === UNCERTAINTY CALCULATION ===
     uncertainty = None
-    if power_estimation and power_estimation.get('recommended_value'):
-        # Collect data for uncertainty calculation
-        recommended_power = power_estimation['recommended_value']
+    uncertainty_data = calculate_uncertainty_data(
+        power_estimation,
+        valid_flags,
+        power_hp_array,
+        speed_kmh_array,
+        acceleration_smooth,
+        slopes,
+        time_seconds,
+        hdop_statistics,
+        weather_data,
+        drag_coefficient,
+        frontal_area,
+        rolling_resistance,
+        rho,
+        uncertainty_mass_kg
+    )
 
-        # Speed at peak power (find point with max power among valid ones)
-        max_power_speed_kmh = 150  # fallback
-        max_power_idx = None
-        max_power_val = 0
-        for idx, (spd, pwr, is_valid) in enumerate(power_speed_data):
-            if is_valid and pwr > max_power_val:
-                max_power_val = pwr
-                max_power_speed_kmh = spd
-                max_power_idx = idx
-
-        v_car_ms = max_power_speed_kmh / 3.6
-
-        # Wind speed from weather
-        wind_kph = 0.0
-        if weather_data:
-            wind_kph = weather_data.get('wind_speed_kph', 0.0)
-
-        # Average acceleration in high power zone
-        # Use acceleration at points with power > 90% of maximum
-        high_power_threshold = max_power_val * 0.9 if max_power_val > 0 else 0
-        high_power_accelerations = []
-        for idx, (spd, pwr, is_valid) in enumerate(power_speed_data):
-            if is_valid and pwr >= high_power_threshold and idx < len(acceleration_smooth):
-                high_power_accelerations.append(abs(acceleration_smooth[idx]))
-        a_ms2 = np.mean(high_power_accelerations) if high_power_accelerations else 1.0
-
-        # Average slope in high power zone
-        high_power_slopes = []
-        for idx, (spd, pwr, is_valid) in enumerate(power_speed_data):
-            if is_valid and pwr >= high_power_threshold and idx < len(slopes):
-                high_power_slopes.append(slopes[idx])
-        slope_avg = np.mean(high_power_slopes) if high_power_slopes else 0.0
-
-        # GPS frequency
-        gps_frequency_hz = 10.0  # default
-        if len(time_seconds) > 1:
-            time_diffs = np.diff(time_seconds)
-            valid_diffs = time_diffs[time_diffs > 0]
-            if len(valid_diffs) > 0:
-                avg_interval = np.mean(valid_diffs)
-                if avg_interval > 0:
-                    gps_frequency_hz = 1.0 / avg_interval
-
-        # Average HDOP
-        hdop_mean = hdop_statistics['mean'] if hdop_statistics else 1.0
-
-        # Consistency score from estimation methods
-        consistency_score = power_estimation.get('consistency_score', 0.85)
-
+    if uncertainty_data:
         # Call uncertainty calculation
         uncertainty_result = calculate_total_uncertainty(
-            v_car_ms=v_car_ms,
-            wind_kph=wind_kph,
-            rho=rho,
-            cd=drag_coefficient,
-            frontal_area=frontal_area,
-            a_ms2=a_ms2,
-            crr=rolling_resistance,
-            slope_avg=slope_avg,
-            power_hp=recommended_power,
-            hdop_mean=hdop_mean,
-            gps_frequency_hz=gps_frequency_hz,
-            consistency_score=consistency_score
+            v_car_ms=uncertainty_data['v_car_ms'],
+            wind_kph=uncertainty_data['wind_kph'],
+            rho=uncertainty_data['rho'],
+            cd=uncertainty_data['cd'],
+            frontal_area=uncertainty_data['frontal_area'],
+            a_ms2=uncertainty_data['a_ms2'],
+            crr=uncertainty_data['crr'],
+            slope_avg=uncertainty_data['slope_avg'],
+            power_hp=uncertainty_data['power_hp'],
+            hdop_mean=uncertainty_data['hdop_mean'],
+            gps_frequency_hz=uncertainty_data['gps_frequency_hz'],
+            consistency_score=uncertainty_data['consistency_score'],
+            delta_mass_kg=uncertainty_data['uncertainty_mass_kg']
         )
 
         # Format output structure
+        wind_kph = uncertainty_data['wind_kph']
+        hdop_mean = uncertainty_data['hdop_mean']
+        gps_frequency_hz = uncertainty_data['gps_frequency_hz']
+        recommended_power = uncertainty_data['power_hp']
+        
         uncertainty = {
             'total_hp': uncertainty_result.total_hp,
             'type': 'worst-case',
@@ -509,7 +433,7 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
                 },
                 'mass': {
                     'hp': uncertainty_result.mass_hp,
-                    'note': f"±{getattr(config, 'UNCERTAINTY_MASS_KG', 20)} kg"
+                    'note': f"±{uncertainty_mass_kg} kg"
                 },
                 'gps': {
                     'hp': uncertainty_result.gps_hp,
@@ -523,10 +447,12 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
             ]
         }
 
-    time_map = {}
-    for i, ts in enumerate(times_str):
-        if i < len(time_seconds):
-            time_map[time_seconds[i]] = ts
+    # Use dict comprehension for better performance
+    time_map = {
+        time_seconds[i]: ts
+        for i, ts in enumerate(times_str)
+        if i < len(time_seconds)
+    }
 
     return {
         'power_time': power_time_series,

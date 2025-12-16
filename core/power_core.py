@@ -22,15 +22,12 @@ Contains auxiliary functions for power calculation.
 Main calculation logic is in calculator.py.
 """
 import numpy as np
-import os
-import sys
 
-# Add parent directory to path for config import
-PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PARENT_DIR not in sys.path:
-    sys.path.insert(0, PARENT_DIR)
+try:
+    from .. import config
+except ImportError:
+    import config
 
-from config import WINDOW_HALF_WIDTH
 from .structures import (
     POWER_SPEED_SPEED_KMH,
     POWER_SPEED_POWER_HP,
@@ -66,8 +63,9 @@ def calculate_average_speed_for_percentile(power_speed_data, percentile):
     if n == 0:
         return None
 
-    start_percent = max(0, percentile - WINDOW_HALF_WIDTH)
-    end_percent = min(100, percentile + WINDOW_HALF_WIDTH)
+    window_half_width = getattr(config, 'WINDOW_HALF_WIDTH', 5)
+    start_percent = max(0, percentile - window_half_width)
+    end_percent = min(100, percentile + window_half_width)
 
     start_index = int(np.floor(start_percent / 100 * n))
     end_index = int(np.ceil(end_percent / 100 * n))

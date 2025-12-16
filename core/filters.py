@@ -76,6 +76,12 @@ def kalman_cv(meas, times, q=None, r=None):
     # Get minimum dt from config
     min_dt = getattr(config, 'KALMAN_MIN_DT', 1e-6)
 
+    # Pre-allocate matrices (reused in loop)
+    F = np.zeros((2, 2))
+    Q = np.zeros((2, 2))
+    R = np.array([[r**2]])  # Constant, pre-allocate once
+    eye2 = np.eye(2)  # Reuse identity matrix
+
     for i in range(N):
         if i == 0:
             speeds_kf[0] = x[0]
@@ -83,17 +89,29 @@ def kalman_cv(meas, times, q=None, r=None):
             continue
 
         dti = max(times[i] - times[i-1], min_dt)  # Protection against duplicate timestamps
-        F = np.array([[1.0, dti], [0.0, 1.0]])
-        Q = np.array([[dti**3/3, dti**2/2], [dti**2/2, dti]]) * q**2
+        
+        # Update F and Q matrices in-place (faster than creating new arrays)
+        F[0, 0] = 1.0
+        F[0, 1] = dti
+        F[1, 0] = 0.0
+        F[1, 1] = 1.0
+        
+        dti2 = dti * dti
+        dti3 = dti2 * dti
+        q2 = q * q
+        Q[0, 0] = (dti3 / 3.0) * q2
+        Q[0, 1] = (dti2 / 2.0) * q2
+        Q[1, 0] = Q[0, 1]  # Symmetric
+        Q[1, 1] = dti * q2
+        
         x = F.dot(x)
         P = F.dot(P).dot(F.T) + Q
-        z = np.array([meas[i]])
-        R = np.array([[r**2]])
+        z = np.array([meas[i]])  # Keep as array for consistency
         y = z - H.dot(x)
         S = H.dot(P).dot(H.T) + R
         K = P.dot(H.T).dot(np.linalg.inv(S))
         x = x + K.dot(y)
-        P = (np.eye(2) - K.dot(H)).dot(P)
+        P = (eye2 - K.dot(H)).dot(P)
         speeds_kf[i] = x[0]
         acc_kf[i] = x[1]
 
@@ -140,6 +158,12 @@ def kalman_cv_adaptive(meas, times, q=None, r_array=None, r_default=None):
     # Get minimum dt from config
     min_dt = getattr(config, 'KALMAN_MIN_DT', 1e-6)
 
+    # Pre-allocate matrices (reused in loop)
+    F = np.zeros((2, 2))
+    Q = np.zeros((2, 2))
+    R = np.zeros((1, 1))  # Will be updated per iteration
+    eye2 = np.eye(2)  # Reuse identity matrix
+
     for i in range(N):
         if i == 0:
             speeds_kf[0] = x[0]
@@ -147,24 +171,37 @@ def kalman_cv_adaptive(meas, times, q=None, r_array=None, r_default=None):
             continue
 
         dti = max(times[i] - times[i-1], min_dt)  # Protection against duplicate timestamps
-        F = np.array([[1.0, dti], [0.0, 1.0]])
-        Q = np.array([[dti**3/3, dti**2/2], [dti**2/2, dti]]) * q**2
+        
+        # Update F and Q matrices in-place (faster than creating new arrays)
+        F[0, 0] = 1.0
+        F[0, 1] = dti
+        F[1, 0] = 0.0
+        F[1, 1] = 1.0
+        
+        dti2 = dti * dti
+        dti3 = dti2 * dti
+        q2 = q * q
+        Q[0, 0] = (dti3 / 3.0) * q2
+        Q[0, 1] = (dti2 / 2.0) * q2
+        Q[1, 0] = Q[0, 1]  # Symmetric
+        Q[1, 1] = dti * q2
+        
         x = F.dot(x)
         P = F.dot(P).dot(F.T) + Q
-        z = np.array([meas[i]])
-
-        # Use adaptive R if provided, otherwise use default
+        
+        # Get R value for this point
         if r_array is not None and i < len(r_array):
-            r = r_array[i]
+            r_val = r_array[i]
         else:
-            r = r_default
-
-        R = np.array([[r**2]])
+            r_val = r_default
+        R[0, 0] = r_val * r_val
+        
+        z = np.array([meas[i]])  # Keep as array for consistency
         y = z - H.dot(x)
         S = H.dot(P).dot(H.T) + R
         K = P.dot(H.T).dot(np.linalg.inv(S))
         x = x + K.dot(y)
-        P = (np.eye(2) - K.dot(H)).dot(P)
+        P = (eye2 - K.dot(H)).dot(P)
         speeds_kf[i] = x[0]
         acc_kf[i] = x[1]
 
@@ -235,6 +272,32 @@ def validate_param(name, value, default, min_value=0.0, max_value=None):
     if value is None or (isinstance(value, (int, float)) and value <= min_value) or (max_value is not None and value > max_value):
         return default
     return value
+
+
+def calculate_savgol_window_size(data_length, window_length=None, divisor=None):
+    """
+    Calculate appropriate Savitzky-Golay window size for given data length.
+
+    Ensures window is odd (required by Savitzky-Golay) and not larger than data.
+
+    Args:
+        data_length: length of data array
+        window_length: base window length (default: config.SAVGOL_WINDOW_LENGTH)
+        divisor: divisor for dynamic sizing (default: config.SAVGOL_WINDOW_DIVISOR)
+
+    Returns:
+        int: window size (always odd, >= 3, <= data_length)
+    """
+    if window_length is None:
+        window_length = getattr(config, 'SAVGOL_WINDOW_LENGTH', 11)
+    if divisor is None:
+        divisor = getattr(config, 'SAVGOL_WINDOW_DIVISOR', 5)
+
+    window_size = min(window_length, data_length // divisor)
+    # Ensure window is odd (required by Savitzky-Golay)
+    if window_size % 2 == 0:
+        window_size = max(3, window_size - 1)
+    return window_size
 
 
 def apply_savgol_filter(data, window_size, polyorder=None):

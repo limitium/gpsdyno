@@ -19,20 +19,15 @@
 GPSDyno visualization module.
 Contains functions for power and track chart generation.
 """
+import logging
+from bisect import bisect_left
+
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
-import os
-import sys
-import logging
 from PIL import Image
 from scipy.signal import find_peaks
-
-# Add parent directory to path for imports
-PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PARENT_DIR not in sys.path:
-    sys.path.insert(0, PARENT_DIR)
 
 try:
     from .. import config
@@ -523,9 +518,20 @@ def correlate_track_data(coords_data, speed_data, altitude_data, power_data):
     # ts_ms -> altitude_m
     alt_by_ts = {a[ALT_ABS_MS]: a[ALT_ALTITUDE_M] for a in altitude_data}
 
-    # Build relative_s -> power map
-    power_by_rel = {p[0]: p[1] for p in power_data.get('power_time', [])}
+    # Build sorted arrays for power lookup (for binary search - O(log n) vs O(n))
+    power_time_data = power_data.get('power_time', [])
     first_ts = power_data.get('first_timestamp_ms', coords_data[0][0] if coords_data else 0)
+    
+    if power_time_data:
+        # Sort by time for binary search
+        power_times = np.array([p[0] for p in power_time_data])
+        power_values = np.array([p[1] for p in power_time_data])
+        sort_idx = np.argsort(power_times)
+        power_times_sorted = power_times[sort_idx]
+        power_values_sorted = power_values[sort_idx]
+    else:
+        power_times_sorted = np.array([])
+        power_values_sorted = np.array([])
 
     result = {'coords': [], 'speeds': [], 'altitudes': [], 'powers': []}
 
@@ -542,12 +548,25 @@ def correlate_track_data(coords_data, speed_data, altitude_data, power_data):
         # Altitude
         result['altitudes'].append(alt_by_ts.get(ts_ms, 0))
 
-        # Power (find closest by relative time)
+        # Power (find closest by relative time using binary search - O(log n))
         rel_s = (ts_ms - first_ts) / 1000.0
-        if power_by_rel:
-            closest_t = min(power_by_rel.keys(), key=lambda t: abs(t - rel_s))
-            if abs(closest_t - rel_s) < 0.5:
-                result['powers'].append(max(0, power_by_rel[closest_t]))
+        if len(power_times_sorted) > 0:
+            # Binary search for closest time
+            idx = bisect_left(power_times_sorted, rel_s)
+            
+            # Check neighbors for closest match
+            candidates = []
+            if idx > 0:
+                candidates.append((abs(power_times_sorted[idx - 1] - rel_s), power_values_sorted[idx - 1]))
+            if idx < len(power_times_sorted):
+                candidates.append((abs(power_times_sorted[idx] - rel_s), power_values_sorted[idx]))
+            
+            if candidates:
+                closest_dist, closest_power = min(candidates, key=lambda x: x[0])
+                if closest_dist < 0.5:
+                    result['powers'].append(max(0, closest_power))
+                else:
+                    result['powers'].append(0)
             else:
                 result['powers'].append(0)
         else:

@@ -473,12 +473,17 @@ def calculate_gps_frequency(timestamp_milliseconds):
         return 0
 
     interval_sum = 0
+    valid_count = 0
     for i in range(1, len(timestamp_milliseconds)):
         time_diff = timestamp_milliseconds[i] - timestamp_milliseconds[i - 1]
         if 0 < time_diff < 5000:
             interval_sum += time_diff
+            valid_count += 1
 
-    average_interval = interval_sum / (len(timestamp_milliseconds) - 1)
+    if valid_count == 0:
+        return 0
+    
+    average_interval = interval_sum / valid_count
     gps_frequency = 1000 / average_interval if average_interval > 0 else 0
     return round(gps_frequency, 2)
 
