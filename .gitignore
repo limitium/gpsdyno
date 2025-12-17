@@ -159,3 +159,9 @@ result_*.png
 *.nmea.bak
 *.nmea.tmp
 
+/parsers/rcz_to_nmea.py
+/test/test_rcz_to_nmea.py
+
+/test_output/
+test_visualization.py
+

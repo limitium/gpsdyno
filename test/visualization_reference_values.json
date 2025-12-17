@@ -1,0 +1,30 @@
+{
+  "2105 - turbo - Grade4_1020.nmea": {
+    "speed_data_points": 1802,
+    "coordinate_points": 3604,
+    "iterations": 50,
+    "plot_power_chart": {
+      "median_seconds": 0.47998606303008273,
+      "mean_seconds": 0.5140852100006305,
+      "stdev_seconds": 0.06705880808160018,
+      "min_seconds": 0.4404055420309305,
+      "max_seconds": 0.7162049999460578
+    },
+    "correlate_track_data": {
+      "median_seconds": 0.013213479425758123,
+      "mean_seconds": 0.017651326623745262,
+      "stdev_seconds": 0.023205443808910153
+    },
+    "plot_track_pseudo3d": {
+      "median_seconds": 0.17241695849224925,
+      "mean_seconds": 0.19063265991397202,
+      "stdev_seconds": 0.030440828902877942,
+      "min_seconds": 0.15780937497038394,
+      "max_seconds": 0.3077493340242654
+    },
+    "total_per_iteration": {
+      "median_seconds": 0.6656165009480901,
+      "mean_seconds": 0.7223691965383477
+    }
+  }
+}
