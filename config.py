@@ -73,6 +73,13 @@ SAVGOL_WINDOW_LENGTH = 11  # Window length (must be odd)
 SAVGOL_WINDOW_DIVISOR = 5  # Dynamic window: min(WINDOW_LENGTH, len/DIVISOR)
 SAVGOL_POLYORDER = 1       # Polynomial order for Savitzky-Golay filter
 
+# Heading Filter Parameters (aggressive filtering for straights)
+# ============================================================
+HEADING_FILTER_WINDOW_LENGTH = 21  # Larger window for heading smoothing (must be odd)
+HEADING_FILTER_WINDOW_DIVISOR = 3   # More aggressive: larger window relative to data length
+HEADING_FILTER_POLYORDER = 2       # Higher polynomial order for smoother curves
+HEADING_FILTER_MIN_WINDOW = 5      # Minimum window size for filtering
+
 # ============================================================
 # Slope Calculation Parameters
 # ============================================================

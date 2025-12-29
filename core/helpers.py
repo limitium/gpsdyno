@@ -28,7 +28,7 @@ try:
 except ImportError:
     import config
 
-from .structures import PERCENT_TO_DECIMAL, MS_TO_S
+from .structures import PERCENT_TO_DECIMAL, MS_TO_S, KMH_TO_MS
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +186,238 @@ def process_altitude_data_for_slopes(
         logger.error(f"Error processing altitude data: {e}", exc_info=True)
 
     return slopes
+
+
+def calculate_bearing_from_coords(lat1, lon1, lat2, lon2):
+    """
+    Calculate bearing (heading) from two GPS coordinates.
+    
+    Uses the haversine formula to calculate the initial bearing from point 1 to point 2.
+    
+    Convention: Navigation bearing (direction vehicle is traveling TO)
+    - 0° = North
+    - 90° = East
+    - 180° = South
+    - 270° = West
+    
+    This matches the standard navigation convention used for vehicle headings.
+    
+    Args:
+        lat1: Latitude of first point (degrees)
+        lon1: Longitude of first point (degrees)
+        lat2: Latitude of second point (degrees)
+        lon2: Longitude of second point (degrees)
+    
+    Returns:
+        float: Bearing in degrees (0-360, where 0 is North, 90 is East)
+    """
+    import math
+    
+    # Convert to radians
+    lat1_rad = math.radians(lat1)
+    lat2_rad = math.radians(lat2)
+    dlon_rad = math.radians(lon2 - lon1)
+    
+    # Calculate bearing
+    y = math.sin(dlon_rad) * math.cos(lat2_rad)
+    x = (math.cos(lat1_rad) * math.sin(lat2_rad) - 
+         math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(dlon_rad))
+    
+    bearing_rad = math.atan2(y, x)
+    bearing_deg = math.degrees(bearing_rad)
+    
+    # Normalize to 0-360
+    bearing_deg = (bearing_deg + 360) % 360
+    
+    return bearing_deg
+
+
+def calculate_headings_from_coords(coords_data, time_seconds, first_timestamp_ms_arg,
+                                    calculate_savgol_window_size_func=None,
+                                    apply_savgol_filter_func=None):
+    """
+    Calculate vehicle headings from GPS coordinates with aggressive filtering.
+    
+    Since power calculations are done on straights, headings are heavily filtered
+    to reduce GPS noise. Uses Savitzky-Golay filter with large window size.
+    
+    Args:
+        coords_data: list of coordinate tuples (timestamp_ms, lat, lon)
+        time_seconds: array of time values in seconds (for interpolation)
+        first_timestamp_ms_arg: first timestamp in ms
+        calculate_savgol_window_size_func: function to calculate Savitzky-Golay window size
+        apply_savgol_filter_func: function to apply Savitzky-Golay filter
+    
+    Returns:
+        np.ndarray: headings in degrees (0-360), same length as time_seconds, or None if insufficient data
+    """
+    if not coords_data or len(coords_data) < 2:
+        return None
+    
+    try:
+        # Import filter functions if not provided
+        if calculate_savgol_window_size_func is None or apply_savgol_filter_func is None:
+            from .filters import calculate_savgol_window_size, apply_savgol_filter
+            if calculate_savgol_window_size_func is None:
+                calculate_savgol_window_size_func = calculate_savgol_window_size
+            if apply_savgol_filter_func is None:
+                apply_savgol_filter_func = apply_savgol_filter
+        
+        # Get heading filter parameters (more aggressive than speed/altitude)
+        heading_window_length = getattr(config, 'HEADING_FILTER_WINDOW_LENGTH', 21)  # Larger default window
+        heading_window_divisor = getattr(config, 'HEADING_FILTER_WINDOW_DIVISOR', 3)  # More aggressive
+        heading_polyorder = getattr(config, 'HEADING_FILTER_POLYORDER', 2)  # Higher order for smoothness
+        
+        # Extract coordinates and timestamps
+        n_coords = len(coords_data)
+        coord_times_ms = np.empty(n_coords, dtype=np.int64)
+        lats = np.empty(n_coords, dtype=float)
+        lons = np.empty(n_coords, dtype=float)
+        
+        for i, point in enumerate(coords_data):
+            coord_times_ms[i] = point[0]  # timestamp_ms is first element
+            lats[i] = point[1]  # lat is second element
+            lons[i] = point[2]  # lon is third element
+        
+        # Calculate first timestamp
+        first_timestamp_sec_val = 0.0
+        if first_timestamp_ms_arg is not None:
+            first_timestamp_sec_val = first_timestamp_ms_arg / MS_TO_S
+        elif len(coord_times_ms) > 0:
+            first_timestamp_sec_val = coord_times_ms[0] / MS_TO_S
+        
+        # Convert to relative time in seconds
+        coord_times_sec = (coord_times_ms / MS_TO_S) - first_timestamp_sec_val
+        
+        # Calculate bearings between consecutive points
+        headings = np.zeros(n_coords, dtype=float)
+        for i in range(1, n_coords):
+            bearing = calculate_bearing_from_coords(
+                lats[i-1], lons[i-1],
+                lats[i], lons[i]
+            )
+            headings[i] = bearing
+        
+        # First point uses same heading as second
+        if n_coords > 1:
+            headings[0] = headings[1]
+        
+        # Handle duplicate timestamps
+        if len(coord_times_sec) != len(np.unique(coord_times_sec)):
+            unique_times, unique_indices = np.unique(coord_times_sec, return_inverse=True)
+            unique_headings = np.zeros_like(unique_times)
+            for i, t in enumerate(unique_times):
+                mask = unique_indices == i
+                # Average headings for duplicate timestamps
+                unique_headings[i] = np.mean(headings[mask])
+            coord_times_sec = unique_times
+            headings = unique_headings
+        
+        if len(coord_times_sec) < 2:
+            return None
+        
+        # === AGGRESSIVE FILTERING FOR HEADINGS ===
+        # Since power is calculated on straights, we can use heavy filtering
+        # Convert to continuous angle space (unwrap) for filtering
+        headings_rad = np.radians(headings)
+        headings_unwrapped = np.unwrap(headings_rad)
+        
+        # Apply Savitzky-Golay filter with aggressive window size
+        window_size = calculate_savgol_window_size_func(
+            len(headings_unwrapped),
+            heading_window_length,
+            heading_window_divisor
+        )
+        
+        # Ensure minimum window size for effective filtering, but not larger than data
+        min_window = getattr(config, 'HEADING_FILTER_MIN_WINDOW', 5)
+        window_size = max(window_size, min(min_window, len(headings_unwrapped)))
+        window_size = min(window_size, len(headings_unwrapped))  # Ensure not larger than data
+        
+        # Apply filter
+        headings_filtered = apply_savgol_filter_func(
+            headings_unwrapped,
+            window_size,
+            polyorder=heading_polyorder
+        )
+        
+        # Interpolate filtered headings to speed time grid
+        from scipy.interpolate import interp1d
+        heading_interp = interp1d(
+            coord_times_sec, headings_filtered,
+            kind='linear', bounds_error=False,
+            fill_value=(headings_filtered[0], headings_filtered[-1])
+        )
+        headings_at_speed_times_rad = heading_interp(time_seconds)
+        
+        # Convert back to degrees and normalize to 0-360
+        headings_at_speed_times = np.degrees(headings_at_speed_times_rad)
+        headings_at_speed_times = (headings_at_speed_times + 360) % 360
+        
+        return headings_at_speed_times
+        
+    except Exception as e:
+        logger.error(f"Error calculating headings from coordinates: {e}", exc_info=True)
+        return None
+
+
+def calculate_relative_wind_speed(
+    car_speed_ms, car_heading_deg, wind_speed_kph, wind_direction_deg
+):
+    """
+    Calculate relative wind speed along the car's direction of travel.
+    
+    Both use the same angular convention (0° = North):
+    - Car heading: Navigation convention - direction car is traveling TO
+      (0° = North, 90° = East, 180° = South, 270° = West)
+    - Wind direction: Meteorological convention - direction wind is coming FROM
+      (0° = wind FROM North, 90° = wind FROM East, 180° = wind FROM South, 270° = wind FROM West)
+    
+    Examples:
+    - Car heading 0° (North) + Wind direction 0° (FROM North) = Headwind
+    - Car heading 0° (North) + Wind direction 180° (FROM South) = Tailwind
+    - Car heading 90° (East) + Wind direction 90° (FROM East) = Headwind
+    
+    Args:
+        car_speed_ms: Car speed in m/s
+        car_heading_deg: Car heading in degrees (0-360, 0 = North, direction TO)
+        wind_speed_kph: Wind speed in km/h
+        wind_direction_deg: Wind direction in degrees (0-360, 0 = North, direction FROM)
+    
+    Returns:
+        float: Relative airspeed in m/s
+    """
+    if wind_speed_kph <= 0:
+        return car_speed_ms
+    
+    # Convert wind speed to m/s
+    wind_speed_ms = wind_speed_kph / KMH_TO_MS
+    
+    # Wind direction is where wind comes FROM
+    # To get the component along car's direction:
+    # - If wind comes FROM direction θ_wind and car goes TO direction θ_car
+    # - The component = wind_speed * cos(θ_car - θ_wind)
+    # - Positive = headwind (wind opposes car), negative = tailwind (wind assists car)
+    angle_diff_deg = car_heading_deg - wind_direction_deg
+    
+    # Normalize to -180 to 180
+    angle_diff_deg = ((angle_diff_deg + 180) % 360) - 180
+    
+    # Convert to radians
+    angle_diff_rad = np.radians(angle_diff_deg)
+    
+    # Component of wind along car's direction
+    # cos(angle) gives the projection: positive = headwind, negative = tailwind
+    wind_component_ms = wind_speed_ms * np.cos(angle_diff_rad)
+    
+    # Relative airspeed = car speed + wind component
+    # (headwind increases effective speed, tailwind decreases it)
+    relative_airspeed_ms = car_speed_ms + wind_component_ms
+    
+    # Ensure non-negative (minimum 0.1 m/s to avoid numerical issues)
+    relative_airspeed_ms = max(relative_airspeed_ms, 0.1)
+    
+    return relative_airspeed_ms
 
 
 def calculate_uncertainty_data(

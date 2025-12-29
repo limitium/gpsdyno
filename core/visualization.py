@@ -235,8 +235,6 @@ def _create_combined_legend(ax, power_estimation, uncertainty, filter_info, dt_i
                                           label='─' * 25, color='none'))
         components = uncertainty['components']
         parts = []
-        if components.get('wind', {}).get('hp'):
-            parts.append(f"Wind ±{components['wind']['hp']:.0f}")
         if components.get('gps', {}).get('hp'):
             parts.append(f"GPS ±{components['gps']['hp']:.0f}")
         if components.get('mass', {}).get('hp'):

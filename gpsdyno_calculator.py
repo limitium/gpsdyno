@@ -293,13 +293,16 @@ def main():
             print(json.dumps(error_response, ensure_ascii=False, indent=2))
             sys.exit(1)
 
+        coords_data = result.get('coords', None)
+        
         power_data = calculate_power(
             speed_data,
             car_info,
             weather_data,
             altitude_data,
             result.get('first_timestamp_ms'),
-            methods=args.methods
+            methods=args.methods,
+            coords_data=coords_data
         )
 
         if not power_data:

@@ -19,10 +19,12 @@
 Power uncertainty calculation module.
 
 Accounts for uncertainty sources:
-- Wind (worst case: headwind/tailwind)
 - GPS quality (HDOP, frequency)
 - Vehicle mass (default ±20 kg)
 - Consistency score as uncertainty multiplier
+
+Note: Wind is not included in uncertainty since it's now accounted for
+directly in the power calculation using wind direction and heading.
 
 Outputs worst-case bounds.
 """
@@ -49,7 +51,6 @@ WATTS_TO_HP = 735.5
 @dataclass
 class UncertaintyComponents:
     """Power uncertainty components (in WHP)."""
-    wind_hp: float           # ±ΔP from wind (worst case)
     mass_hp: float           # ±ΔP from mass
     gps_hp: float            # ±ΔP from GPS quality
     consistency_multiplier: float  # Multiplier from consistency score
@@ -213,10 +214,6 @@ def get_consistency_multiplier(consistency_score: float) -> float:
 
 def calculate_total_uncertainty(
     v_car_ms: float,
-    wind_kph: float,
-    rho: float,
-    cd: float,
-    frontal_area: float,
     a_ms2: float,
     crr: float,
     slope_avg: float,
@@ -230,17 +227,16 @@ def calculate_total_uncertainty(
     Main function: computes all uncertainty components.
 
     Final formula (worst-case):
-    total = √(wind² + mass² + gps²) × consistency_multiplier
+    total = √(mass² + gps²) × consistency_multiplier
 
     All components are worst-case (maximum deviations), not σ.
     Consistency multiplier increases uncertainty for unstable data.
+    
+    Note: Wind is not included in uncertainty since it's now accounted for
+    directly in the power calculation using wind direction.
 
     Args:
         v_car_ms: Speed at peak power (m/s)
-        wind_kph: Wind speed (km/h)
-        rho: Air density (kg/m³)
-        cd: Drag coefficient
-        frontal_area: Frontal area (m²)
         a_ms2: Average acceleration (m/s²)
         crr: Rolling resistance coefficient
         slope_avg: Average road slope
@@ -254,14 +250,6 @@ def calculate_total_uncertainty(
         UncertaintyComponents with components and total uncertainty
     """
     # Compute each component (all worst-case)
-    wind_hp = calculate_wind_uncertainty(
-        v_car_ms=v_car_ms,
-        wind_kph=wind_kph,
-        rho=rho,
-        cd=cd,
-        frontal_area=frontal_area
-    )
-
     mass_hp = calculate_mass_uncertainty(
         v_ms=v_car_ms,
         a_ms2=a_ms2,
@@ -279,13 +267,12 @@ def calculate_total_uncertainty(
     consistency_multiplier = get_consistency_multiplier(consistency_score)
 
     # Quadratic sum of components (worst-case)
-    base = np.sqrt(wind_hp**2 + mass_hp**2 + gps_hp**2)
+    base = np.sqrt(mass_hp**2 + gps_hp**2)
 
     # Total uncertainty with consistency (no ×2, since worst-case)
     total = base * consistency_multiplier
 
     return UncertaintyComponents(
-        wind_hp=round(wind_hp, 1),
         mass_hp=round(mass_hp, 1),
         gps_hp=round(gps_hp, 1),
         consistency_multiplier=round(consistency_multiplier, 2),

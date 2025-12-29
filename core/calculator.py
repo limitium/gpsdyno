@@ -43,6 +43,8 @@ from .helpers import (
     calculate_air_density_from_weather,
     process_altitude_data_for_slopes,
     calculate_uncertainty_data,
+    calculate_headings_from_coords,
+    calculate_relative_wind_speed,
 )
 from .structures import (
     SPEED_ABS_MS,
@@ -69,7 +71,7 @@ logger = logging.getLogger(__name__)
 
 
 def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
-                    first_timestamp_ms_arg=None, methods=None):
+                    first_timestamp_ms_arg=None, methods=None, coords_data=None):
     """
     Calculate wheel horsepower from GPS data.
 
@@ -78,10 +80,11 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
     Args:
         speed_data: list of tuples (abs_ms, rel_ms, time_str, speed_kmh, nmea, sats, hdop)
         car_info: dict with vehicle params (mass, drag_coefficient, frontal_area, rolling_resistance)
-        weather_data: dict with weather data (temperature_c, pressure_hpa, humidity_percent, wind_speed_kph)
+        weather_data: dict with weather data (temperature_c, pressure_hpa, humidity_percent, wind_speed_kph, wind_direction_deg)
         altitude_data: list of tuples with altitude data
         first_timestamp_ms_arg: first timestamp in ms (for synchronization)
         methods: list of power estimation methods (default: ['peak_detection'])
+        coords_data: list of coordinate tuples (timestamp_ms, lat, lon) for heading calculation
 
     Returns:
         dict: {
@@ -329,10 +332,57 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
         max_safe_slope
     )
 
+    # === CALCULATE HEADINGS AND RELATIVE WIND SPEED ===
+    # Calculate headings from GPS coordinates if available
+    # Pass filter functions for aggressive smoothing (power is calculated on straights)
+    headings = None
+    if coords_data and len(coords_data) >= 2:
+        headings = calculate_headings_from_coords(
+            coords_data, time_seconds, first_timestamp_ms_arg,
+            calculate_savgol_window_size_func=calculate_savgol_window_size,
+            apply_savgol_filter_func=apply_savgol_filter
+        )
+    
+    # Calculate relative wind speed (accounting for wind direction)
+    # If wind direction is not available, fall back to using just car speed
+    wind_speed_kph = 0.0
+    wind_direction_deg = None
+    if weather_data:
+        wind_speed_kph = weather_data.get('wind_speed_kph', 0.0)
+        wind_direction_deg = weather_data.get('wind_direction_deg', None)
+    
+    # Calculate relative airspeed for each point
+    if headings is not None and wind_direction_deg is not None and wind_speed_kph > 0:
+        # Vectorized calculation of relative wind speed
+        # Both use same angular convention (0° = North):
+        # - Car heading: direction car is traveling TO (navigation convention)
+        # - Wind direction: direction wind is coming FROM (meteorological convention)
+        wind_speed_ms = wind_speed_kph / KMH_TO_MS
+        # To get the component along car's direction:
+        # - If wind comes FROM direction θ_wind and car goes TO direction θ_car
+        # - The component = wind_speed * cos(θ_car - θ_wind)
+        # - Positive = headwind (wind opposes car), negative = tailwind (wind assists car)
+        angle_diff_deg = headings - wind_direction_deg
+        # Normalize to -180 to 180
+        angle_diff_deg = ((angle_diff_deg + 180) % 360) - 180
+        # Convert to radians
+        angle_diff_rad = np.radians(angle_diff_deg)
+        # Component of wind along car's direction (positive = headwind, negative = tailwind)
+        wind_component_ms = wind_speed_ms * np.cos(angle_diff_rad)
+        # Relative airspeed = car speed + wind component
+        # (headwind increases effective speed, tailwind decreases it)
+        relative_airspeeds = speeds_smooth + wind_component_ms
+        # Ensure non-negative (minimum 0.1 m/s to avoid numerical issues)
+        relative_airspeeds = np.maximum(relative_airspeeds, 0.1)
+    else:
+        # No wind direction data or no headings - use car speed only
+        relative_airspeeds = speeds_smooth
+
     # === VECTORIZED POWER CALCULATION ===
     v = speeds_smooth
 
-    air_resistance_force = AERODYNAMIC_FORCE_COEFFICIENT * rho * drag_coefficient * frontal_area * v**2
+    # Use relative airspeed (accounting for wind) in air resistance calculation
+    air_resistance_force = AERODYNAMIC_FORCE_COEFFICIENT * rho * drag_coefficient * frontal_area * relative_airspeeds**2
     rolling_force = mass * gravity * rolling_resistance
     acceleration_force = mass * acceleration_smooth
     slope_force = mass * gravity * slopes
@@ -402,10 +452,6 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
         # Call uncertainty calculation
         uncertainty_result = calculate_total_uncertainty(
             v_car_ms=uncertainty_data['v_car_ms'],
-            wind_kph=uncertainty_data['wind_kph'],
-            rho=uncertainty_data['rho'],
-            cd=uncertainty_data['cd'],
-            frontal_area=uncertainty_data['frontal_area'],
             a_ms2=uncertainty_data['a_ms2'],
             crr=uncertainty_data['crr'],
             slope_avg=uncertainty_data['slope_avg'],
@@ -417,20 +463,16 @@ def calculate_power(speed_data, car_info, weather_data=None, altitude_data=None,
         )
 
         # Format output structure
-        wind_kph = uncertainty_data['wind_kph']
         hdop_mean = uncertainty_data['hdop_mean']
         gps_frequency_hz = uncertainty_data['gps_frequency_hz']
         recommended_power = uncertainty_data['power_hp']
+        uncertainty_mass_kg = uncertainty_data.get('uncertainty_mass_kg', 20)
         
         uncertainty = {
             'total_hp': uncertainty_result.total_hp,
             'type': 'worst-case',
             'display': f"±{int(round(uncertainty_result.total_hp))}",
             'components': {
-                'wind': {
-                    'hp': uncertainty_result.wind_hp,
-                    'note': f"headwind/tailwind {wind_kph:.0f} km/h" if wind_kph > 0 else "wind not accounted"
-                },
                 'mass': {
                     'hp': uncertainty_result.mass_hp,
                     'note': f"±{uncertainty_mass_kg} kg"
